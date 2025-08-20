@@ -102,7 +102,7 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     // Check if req.body exists
-    if (!req.body || typeof req.body !== 'object') {
+    if (!req.body || typeof req.body !== "object") {
       return res.status(400).json({
         status: "fail",
         message: "Request body is missing or invalid.",
@@ -120,7 +120,7 @@ export const login = async (req, res) => {
     }
 
     // Additional validation for string types
-    if (typeof email !== 'string' || typeof password !== 'string') {
+    if (typeof email !== "string" || typeof password !== "string") {
       return res.status(400).json({
         status: "fail",
         message: "Email and password must be strings.",
@@ -149,14 +149,14 @@ export const login = async (req, res) => {
 
     // Find user with password field included
     const user = await Users.findOne({ email: trimmedEmail.toLowerCase() })
-      .select('+password')
-      .select('+refreshToken');
+      .select("+password")
+      .select("+refreshToken");
 
     if (!user) {
       // Use the same error message for security
-      return res.status(401).json({ 
-        status: "fail", 
-        message: "Invalid email or password." 
+      return res.status(401).json({
+        status: "fail",
+        message: "Invalid email or password.",
       });
     }
 
@@ -164,7 +164,7 @@ export const login = async (req, res) => {
     if (!user.isActive) {
       return res.status(403).json({
         status: "fail",
-        message: "Account is deactivated. Please contact support."
+        message: "Account is deactivated. Please contact support.",
       });
     }
 
@@ -173,9 +173,9 @@ export const login = async (req, res) => {
 
     if (!isMatch) {
       // Use the same error message for security
-      return res.status(401).json({ 
-        status: "fail", 
-        message: "Invalid email or password." 
+      return res.status(401).json({
+        status: "fail",
+        message: "Invalid email or password.",
       });
     }
 
@@ -200,7 +200,7 @@ export const login = async (req, res) => {
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? "Strict" : "Lax",
+      sameSite: "None",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
     });
@@ -222,21 +222,20 @@ export const login = async (req, res) => {
       user: userResponse,
       token,
     });
-
   } catch (error) {
     console.error("Login error:", error);
-    
+
     // Handle specific errors
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        status: "fail", 
-        message: "Validation error" 
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        status: "fail",
+        message: "Validation error",
       });
     }
-    
-    return res.status(500).json({ 
-      status: "error", 
-      message: "Internal server error" 
+
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
     });
   }
 };
