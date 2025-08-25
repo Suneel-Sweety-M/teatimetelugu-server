@@ -2,6 +2,7 @@ import Gallery from "../models/galleryModel.js";
 import Users from "../models/userModel.js";
 import { uploadFile, deleteFile } from "../utils/s3Service.js";
 import { generateUniqueSlug } from "../utils/generateUniqueSlug.js";
+import { generateAudioForTexts } from "../utils/audio.js";
 
 export const addGallery = async (req, res) => {
   try {
@@ -62,6 +63,12 @@ export const addGallery = async (req, res) => {
 
     // ✅ Generate unique slug
     const newsId = await generateUniqueSlug(Gallery, titleEn);
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
 
     const newPost = new Gallery({
       postedBy: user?._id,
@@ -69,6 +76,10 @@ export const addGallery = async (req, res) => {
       name: { en: nameEn, te: nameTe },
       description: { en: descriptionEn, te: descriptionTe },
       category: { en: categoryEn, te: categoryTe },
+      newsAudio: {
+        en: audioFiles.en,
+        te: audioFiles.te,
+      },
       tags: [
         ...(tagsEn
           ? tagsEn.split(",").map((t) => ({ en: t.trim(), te: "" }))
@@ -91,6 +102,62 @@ export const addGallery = async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ status: "fail", message: error.message });
+  }
+};
+
+export const addReaction = async (req, res) => {
+  try {
+    const { galleryId } = req.params;
+    const { type } = req.body;
+    const userId = req.user.user._id;
+
+    if (!galleryId) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "Gallery id not found!" });
+    }
+
+    if (!type) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "Reaction type is not found!" });
+    }
+
+    if (!userId) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "User id not found!" });
+    }
+
+    const gallery = await Gallery.findById(galleryId);
+    if (!gallery) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "Gallery post not found" });
+    }
+
+    const existingReactionIndex = gallery.reactions.findIndex(
+      (reaction) => reaction.userId.toString() === userId.toString()
+    );
+
+    if (existingReactionIndex >= 0) {
+      gallery.reactions[existingReactionIndex].type = type;
+    } else {
+      gallery.reactions.push({ userId, type });
+    }
+
+    await gallery.save();
+
+    res.status(200).send({
+      status: "success",
+      message: "Reaction added/updated successfully",
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).send({
+      status: "fail",
+      message: error.message,
+    });
   }
 };
 
@@ -126,82 +193,155 @@ export const getGalleryById = async (req, res) => {
   }
 };
 
-export const getFilteredGallery = async (req, res) => {
+export const getGalleryByNewsId = async (req, res) => {
   try {
-    const { category, time, searchText, page = 1, limit = 10 } = req.query;
+    const { newsId } = req.params;
 
-    let query = Gallery.find();
-
-    // Filter by category
-    if (category) {
-      query = query.where("category").equals(category);
-    }
-
-    // Filter by time
-    if (time) {
-      const now = new Date();
-      let startDate;
-
-      switch (time) {
-        case "last24h":
-          startDate = new Date(now - 24 * 60 * 60 * 1000);
-          break;
-        case "last1week":
-          startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case "last1month":
-          startDate = new Date(now.setMonth(now.getMonth() - 1));
-          break;
-        case "last6months":
-          startDate = new Date(now.setMonth(now.getMonth() - 6));
-          break;
-        case "above6months":
-          startDate = new Date(now.setMonth(now.getMonth() - 6));
-          query = query.where("createdAt").lt(startDate);
-          break;
-      }
-
-      if (time !== "above6months" && startDate) {
-        query = query.where("createdAt").gte(startDate);
-      }
-    }
-
-    // Search by title or name
-    if (searchText) {
-      query = query.find({
-        $or: [
-          { title: { $regex: searchText, $options: "i" } },
-          { name: { $regex: searchText, $options: "i" } },
-        ],
+    if (!newsId) {
+      return res.status(400).json({
+        status: "fail",
+        message: "newsId parameter is required",
       });
     }
 
-    // Count total docs (for frontend pagination info)
-    const totalItems = await Gallery.countDocuments(query.getFilter());
+    const post = await Gallery.findOne({ newsId })
+      .populate("postedBy", "fullName profileUrl")
+      .exec();
 
-    // Apply pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const gallery = await query
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    if (!post) {
+      return res.status(404).json({
+        status: "fail",
+        message: "News not found",
+      });
+    }
 
-    res.status(200).json({
-      status: "success",
-      gallery,
-      pagination: {
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: parseInt(page),
-        limit: parseInt(limit),
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const suggestedGallery = await Gallery.aggregate([
+      {
+        $match: {
+          newsId: { $ne: newsId },
+          createdAt: { $gte: oneWeekAgo },
+        },
       },
+      { $sample: { size: 20 } },
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      message: "Gallery fetched successfully",
+      gallery: post,
+      suggestedGallery,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      status: "fail",
-      message: "Error while fetching galleries",
+    console.error("Error fetching gallery:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "An error occurred while fetching the gallery",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
+  }
+};
+
+export const getFilteredGallery = async (req, res) => {
+  try {
+    let {
+      category,
+      time,
+      searchText,
+      writer,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    const filter = {};
+
+    // Category filter
+    if (category) {
+      filter.$or = [
+        { "category.en": { $regex: category, $options: "i" } },
+        { "category.te": { $regex: category, $options: "i" } },
+      ];
+    }
+
+    // Writer filter
+    if (writer && mongoose.Types.ObjectId.isValid(writer)) {
+      filter.postedBy = new mongoose.Types.ObjectId(writer);
+    }
+
+    // Search filter (title + description + tags)
+    if (searchText) {
+      filter.$or = [
+        { "title.en": { $regex: searchText, $options: "i" } },
+        { "title.te": { $regex: searchText, $options: "i" } },
+        { "description.en": { $regex: searchText, $options: "i" } },
+        { "description.te": { $regex: searchText, $options: "i" } },
+        { "tags.en": { $regex: searchText, $options: "i" } },
+        { "tags.te": { $regex: searchText, $options: "i" } },
+      ];
+    }
+
+    // Time filter
+    if (time) {
+      const now = new Date();
+      let fromDate = null;
+
+      switch (time) {
+        case "24h":
+          fromDate = new Date(now.setDate(now.getDate() - 1));
+          break;
+        case "week":
+          fromDate = new Date(now.setDate(now.getDate() - 7));
+          break;
+        case "month":
+          fromDate = new Date(now.setMonth(now.getMonth() - 1));
+          break;
+        case "6months":
+          fromDate = new Date(now.setMonth(now.getMonth() - 6));
+          break;
+        case "1year":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 1));
+          break;
+        case "2years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 2));
+          break;
+        case "3years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 3));
+          break;
+        default:
+          break;
+      }
+
+      if (fromDate) {
+        filter.createdAt = { $gte: fromDate };
+      }
+    }
+
+    const totalItems = await Gallery.countDocuments(filter);
+
+    const gallery = await Gallery.find(filter)
+      .populate("postedBy", "name email")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    return res.json({
+      gallery,
+      pagination: {
+        currentPage: page,
+        perPage: limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+      status: "success",
+    });
+  } catch (error) {
+    console.error("Error fetching filtered gallery:", error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -245,8 +385,6 @@ export const editGallery = async (req, res) => {
         imagesToRemove = removedImages;
       }
     }
-
-    console.log("Parsed images to remove:", imagesToRemove);
 
     // Rest of your validation...
     if (
@@ -303,16 +441,10 @@ export const editGallery = async (req, res) => {
         return !imagesToRemove.includes(imageUrl);
       });
 
-      console.log(
-        `Removed ${originalLength - gallery.galleryPics.length} images`
-      );
-
       // Delete files from storage
       for (const imgUrl of imagesToRemove) {
         try {
-          console.log("Attempting to delete:", imgUrl);
           await deleteFile(imgUrl);
-          console.log("Successfully deleted:", imgUrl);
         } catch (err) {
           console.error("Delete error:", err.message);
         }
@@ -361,6 +493,20 @@ export const editGallery = async (req, res) => {
       const newsId = await generateUniqueSlug(Gallery, titleEn, id);
       gallery.newsId = newsId;
     }
+
+    if (gallery.newsAudio) {
+      gallery.newsAudio.en = null;
+      gallery.newsAudio.te = null;
+    }
+
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
+
+    gallery.newsAudio = audioFiles;
 
     await gallery.save();
 

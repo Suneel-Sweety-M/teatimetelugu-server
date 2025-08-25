@@ -48,6 +48,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    lang: {
+      type: String,
+      default: "en",
+    },
     refreshToken: {
       type: String,
       select: false,

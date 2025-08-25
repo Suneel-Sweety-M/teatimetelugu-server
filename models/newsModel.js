@@ -11,7 +11,7 @@ const newsSchema = new mongoose.Schema(
 
     newsId: {
       type: String,
-      unique: true,
+      unique: true, 
       index: true,
     },
 

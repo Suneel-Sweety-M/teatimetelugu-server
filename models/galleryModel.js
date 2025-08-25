@@ -39,6 +39,10 @@ const gallerySchema = new mongoose.Schema(
         te: { type: String },
       },
     ],
+    newsAudio: {
+      en: { type: String }, // English audio file URL
+      te: { type: String }, // Telugu audio file URL
+    },
     reactions: [
       {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "Users" },

@@ -1,4 +1,5 @@
 import JWT from "jsonwebtoken";
+import passport from "passport";
 import {
   compareString,
   createJWT,
@@ -6,10 +7,6 @@ import {
   hashString,
 } from "../middlewares/jwt.js";
 import Users from "../models/userModel.js";
-import passport from "passport";
-import nodemailer from "nodemailer";
-import crypto from "crypto";
-import bcrypt from "bcryptjs";
 
 export const register = async (req, res) => {
   const { fullName, email, password, role = "user" } = req.body;
@@ -212,6 +209,7 @@ export const login = async (req, res) => {
       email: user.email,
       profileUrl: user.profileUrl,
       role: user.role,
+      lang: user.lang,
       isActive: user.isActive,
       createdAt: user.createdAt,
     };
@@ -220,7 +218,7 @@ export const login = async (req, res) => {
       status: "success",
       message: "Login successful",
       user: userResponse,
-      token,
+      // token,
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -238,4 +236,95 @@ export const login = async (req, res) => {
       message: "Internal server error",
     });
   }
+};
+
+export const logout = (req, res) => {
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    // secure: process.env.NODE_ENV === "production",
+    secure: true,
+    // sameSite: "Strict",
+    sameSite: "None",
+  });
+  return res
+    .status(200)
+    .send({ status: "success", message: "Logged out successfully" });
+};
+
+export const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.cookies;
+
+    if (!refreshToken) {
+      return res
+        .status(403)
+        .send({ status: "fail", message: "No token provided!" });
+    }
+
+    const user = await Users.findOne({ refreshToken });
+
+    if (!user) {
+      return res
+        .status(403)
+        .send({ status: "fail", message: "Invalid token!" });
+    }
+
+    JWT.verify(
+      refreshToken,
+      process.env.JWT_REFRESH_SECRET_KEY,
+      (err, decoded) => {
+        if (err) {
+          return res
+            .status(403)
+            .send({ status: "fail", message: "Invalid token!" });
+        }
+
+        const newAccessToken = createJWT(decoded.user);
+
+        res.status(201).json({
+          status: "success",
+          accessToken: newAccessToken,
+        });
+      }
+    );
+  } catch (error) {
+    console.log(error);
+    return res.status(500).send({ status: "fail", message: "Server error!" });
+  }
+};
+
+export const googleCallback = (req, res) => {
+  passport.authenticate("google", { session: false }, async (err, data) => {
+    if (err || !data) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Authentication failed!" });
+    }
+
+    const { user } = data;
+
+    // Get client URL from query
+    let { client } = req.query;
+    const allowedClients = process.env.CLIENT_URLS.split(",");
+
+    // Fallback to first allowed URL if client is missing or invalid
+    if (!client || !allowedClients.includes(client)) {
+      client = allowedClients[0];
+    }
+
+    // Set refresh token cookie
+    const refreshToken = createRefreshJWT(user);
+    await Users.findByIdAndUpdate(user._id, { refreshToken });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "None",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.redirect(
+      `${client}?userId=${user._id}&fullName=${user.fullName}&profileUrl=${user.profileUrl}&role=${user.role}`
+    );
+  })(req, res);
 };

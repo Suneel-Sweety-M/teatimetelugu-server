@@ -63,6 +63,9 @@ app.get("/health", (req, res) => {
 // API routes
 app.use("/api/v1/", router);
 
+// Bypass SSL verification for development (due to Kaspersky)
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // Error handling middleware (should be last)
 app.use(notFound);
 app.use(errorHandler);

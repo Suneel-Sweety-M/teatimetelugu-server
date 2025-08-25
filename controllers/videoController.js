@@ -4,6 +4,7 @@ import { generateUniqueSlug } from "../utils/generateUniqueSlug.js";
 export const addVideo = async (req, res) => {
   try {
     const { title, ytId, subCategory } = req.body;
+    const { user } = req.user;
 
     if (!title.en || !title.te || !ytId) {
       return res.status(400).json({
@@ -12,9 +13,17 @@ export const addVideo = async (req, res) => {
       });
     }
 
+    if (user?.role !== "admin" && user?.role !== "writer") {
+      return res.status(403).json({
+        status: "fail",
+        message: "You do not have permission to add videos.",
+      });
+    }
+
     const newsId = await generateUniqueSlug(Videos, title.en);
 
     const newVideo = new Videos({
+      postedBy: user._id,
       title,
       newsId,
       mainUrl: `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`,
@@ -69,83 +78,150 @@ export const deleteVideo = async (req, res) => {
 
 export const getFilteredVideos = async (req, res) => {
   try {
-    const {
+    let {
       category,
-      subCategory,
+      time,
       searchText,
       writer,
-      cursor,
-      direction = "next",
+      page = 1,
       limit = 10,
     } = req.query;
 
-    let query = {};
+    page = parseInt(page);
+    limit = parseInt(limit);
 
-    if (category) query.category = category;
-    if (subCategory) query.subCategory = subCategory;
-    if (writer) query.postedBy = writer;
+    const filter = {};
 
-    if (searchText) {
-      query.$or = [
-        { title: { $regex: searchText, $options: "i" } },
-        { description: { $regex: searchText, $options: "i" } },
-        { titleTelugu: { $regex: searchText, $options: "i" } },
-        { descriptionTelugu: { $regex: searchText, $options: "i" } },
+    // Category filter
+    if (category) {
+      filter.$or = [
+        { category: { $regex: category, $options: "i" } },
+        { "subCategory.en": { $regex: category, $options: "i" } },
+        { "subCategory.te": { $regex: category, $options: "i" } },
       ];
     }
 
-    let sortQuery = { createdAt: -1 }; // newest first
+    // Writer filter
+    if (writer && mongoose.Types.ObjectId.isValid(writer)) {
+      filter.postedBy = new mongoose.Types.ObjectId(writer);
+    }
 
-    // cursor-based pagination
-    if (cursor) {
-      const cursorDate = new Date(cursor);
-      if (direction === "next") {
-        query.createdAt = { $lt: cursorDate };
-      } else {
-        query.createdAt = { $gt: cursorDate };
-        sortQuery = { createdAt: 1 }; // reverse for prev
+    // Search filter (title only for videos)
+    if (searchText) {
+      filter.$or = [
+        { "title.en": { $regex: searchText, $options: "i" } },
+        { "title.te": { $regex: searchText, $options: "i" } },
+      ];
+    }
+
+    // Time filter
+    if (time) {
+      const now = new Date();
+      let fromDate = null;
+
+      switch (time) {
+        case "24h":
+          fromDate = new Date(now.setDate(now.getDate() - 1));
+          break;
+        case "week":
+          fromDate = new Date(now.setDate(now.getDate() - 7));
+          break;
+        case "month":
+          fromDate = new Date(now.setMonth(now.getMonth() - 1));
+          break;
+        case "6months":
+          fromDate = new Date(now.setMonth(now.getMonth() - 6));
+          break;
+        case "1year":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 1));
+          break;
+        case "2years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 2));
+          break;
+        case "3years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 3));
+          break;
+        default:
+          break;
+      }
+
+      if (fromDate) {
+        filter.createdAt = { $gte: fromDate };
       }
     }
 
-    let videos = await Videos.find(query)
-      .sort(sortQuery)
-      .limit(Number(limit) + 1);
+    const totalItems = await Videos.countDocuments(filter);
 
-    let hasNextPage = false;
-    let hasPrevPage = false;
+    const videos = await Videos.find(filter)
+      .populate("postedBy", "name email")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
 
-    if (videos.length > Number(limit)) {
-      hasNextPage = true;
-      videos = videos.slice(0, Number(limit));
-    }
-
-    if (cursor) {
-      hasPrevPage = true;
-    }
-
-    if (direction === "prev") {
-      videos = videos.reverse();
-    }
-
-    const nextCursor =
-      videos.length > 0 ? videos[videos.length - 1].createdAt : null;
-    const prevCursor = videos.length > 0 ? videos[0].createdAt : null;
-
-    res.status(200).json({
-      status: "success",
-      results: videos.length,
-      data: videos,
-      pageInfo: {
-        hasNextPage,
-        hasPrevPage,
-        nextCursor,
-        prevCursor,
+    return res.json({
+      videos,
+      pagination: {
+        currentPage: page,
+        perPage: limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
       },
+      status: "success",
     });
   } catch (error) {
-    res.status(400).json({
-      status: "fail",
-      message: error.message,
+    console.error("Error fetching filtered videos:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Get Video by NewsId
+export const getVideoByNewsId = async (req, res) => {
+  try {
+    const { newsId } = req.params;
+
+    if (!newsId) {
+      return res.status(400).json({
+        status: "fail",
+        message: "newsId parameter is required",
+      });
+    }
+
+    const post = await Videos.findOne({ newsId })
+      .populate("postedBy", "fullName profileUrl")
+      .exec();
+
+    if (!post) {
+      return res.status(404).json({
+        status: "fail",
+        message: "News not found",
+      });
+    }
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const suggestedVideos = await Videos.aggregate([
+      {
+        $match: {
+          newsId: { $ne: newsId },
+          createdAt: { $gte: oneWeekAgo },
+        },
+      },
+      { $sample: { size: 20 } },
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      message: "Video fetched successfully",
+      video: post,
+      suggestedVideos,
+    });
+  } catch (error) {
+    console.error("Error fetching videos:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "An error occurred while fetching the videos",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

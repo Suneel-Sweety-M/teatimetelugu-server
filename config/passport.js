@@ -1,12 +1,11 @@
-// config/passport.js
-import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import Users from '../models/userModel.js';
-import { createJWT, createRefreshJWT } from '../middlewares/jwt.js';
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import Users from "../models/userModel.js";
+import { createJWT, createRefreshJWT } from "../middlewares/jwt.js";
 
 const googleClientID = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
-const callbackURL = `${process.env.API_URL}/v1/auth/google/callback`;
+const callbackURL = `${process.env.API_URL}/api/v1/auth/google/callback`;
 
 passport.use(
   new GoogleStrategy(
@@ -18,7 +17,7 @@ passport.use(
     async (_accessToken, _refreshToken, profile, done) => {
       try {
         const email = profile?.emails?.[0]?.value;
-        if (!email) return done(new Error('Google profile has no email'), null);
+        if (!email) return done(new Error("Google profile has no email"), null);
 
         let user = await Users.findOne({ email });
 
@@ -27,7 +26,7 @@ passport.use(
             fullName: profile.displayName,
             email,
             profileUrl: profile?.photos?.[0]?.value,
-            role: 'user',
+            role: "user",
             googleId: profile.id,
           });
         }

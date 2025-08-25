@@ -2,6 +2,9 @@ import News from "../models/newsModel.js";
 import Users from "../models/userModel.js";
 import { uploadFile } from "../utils/s3Service.js";
 import { generateUniqueSlug } from "../utils/generateUniqueSlug.js";
+import mongoose from "mongoose";
+import { generateAudioForTexts } from "../utils/audio.js";
+import { sendNewsAddedEmail } from "../utils/mail.js";
 
 export const addNews = async (req, res) => {
   // Check if req.body exists
@@ -87,6 +90,12 @@ export const addNews = async (req, res) => {
 
     // ✅ Generate unique newsId
     const newsId = await generateUniqueSlug(News, titleEn);
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
 
     // ✅ Create new post
     const newPost = new News({
@@ -109,6 +118,10 @@ export const addNews = async (req, res) => {
         en: subCategoryEn || "",
         te: subCategoryTe || "",
       },
+      newsAudio: {
+        en: audioFiles.en,
+        te: audioFiles.te,
+      },
       tags: {
         en: tagsEn ? tagsEn.split(",").map((t) => t.trim()) : [],
         te: tagsTe ? tagsTe.split(",").map((t) => t.trim()) : [],
@@ -119,23 +132,23 @@ export const addNews = async (req, res) => {
     await newPost.save();
 
     // ✅ Notify admins & writers
-    // const users = await Users.find({
-    //   role: { $in: ["admin", "writer"] },
-    //   _id: { $ne: user?._id },
-    // });
+    const users = await Users.find({
+      role: { $in: ["admin", "writer"] },
+      _id: { $ne: user?._id },
+    });
 
-    // users.forEach((u) => {
-    //   sendNewsAddedEmail({
-    //     res,
-    //     email: u.email,
-    //     fullName: u.fullName,
-    //     postedBy: user?.fullName,
-    //     category: categoryEn, // English category for email
-    //     imgSrc: mainUrl,
-    //     newsTitle: titleEn,
-    //     postLink: `${process.env.CLIENT_URL}/${newPost?.category?.en}/${newPost?.newsId}`,
-    //   });
-    // });
+    users.forEach((u) => {
+      sendNewsAddedEmail({
+        res,
+        email: u.email,
+        fullName: u.fullName,
+        postedBy: user?.fullName,
+        category: categoryEn, // English category for email
+        imgSrc: mainUrl,
+        newsTitle: titleEn,
+        postLink: `${process.env.CLIENT_URL}/${newPost?.category?.en}/${newPost?.newsId}`,
+      });
+    });
 
     return res.status(201).json({
       status: "success",
@@ -151,153 +164,104 @@ export const addNews = async (req, res) => {
 // In your backend controller
 export const getFilteredNews = async (req, res) => {
   try {
-    const {
+    let {
       category,
       time,
       searchText,
       writer,
-      cursor, // For cursor-based pagination
-      direction = "next", // 'next' or 'prev'
+      page = 1,
       limit = 10,
-      page, // Optional: keep for backward compatibility
     } = req.query;
 
-    // Parse and validate parameters
-    const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
-    let filter = {};
+    page = parseInt(page);
+    limit = parseInt(limit);
 
-    // Build your existing filters (category, time, searchText, writer)
-    if (category) filter["category.en"] = category;
-    if (writer) filter["postedBy"] = writer;
+    const filter = {};
 
-    if (searchText) {
-      filter["title.en"] = { $regex: searchText, $options: "i" };
+    // Category filter
+    if (category) {
+      filter.$or = [
+        { "category.en": { $regex: category, $options: "i" } },
+        { "category.te": { $regex: category, $options: "i" } },
+      ];
     }
 
+    // Writer filter
+    if (writer && mongoose.Types.ObjectId.isValid(writer)) {
+      filter.postedBy = new mongoose.Types.ObjectId(writer);
+    }
+
+    // Search filter (title + description + tags)
+    if (searchText) {
+      filter.$or = [
+        { "title.en": { $regex: searchText, $options: "i" } },
+        { "title.te": { $regex: searchText, $options: "i" } },
+        { "description.en": { $regex: searchText, $options: "i" } },
+        { "description.te": { $regex: searchText, $options: "i" } },
+        { "tags.en": { $in: [new RegExp(searchText, "i")] } },
+        { "tags.te": { $in: [new RegExp(searchText, "i")] } },
+      ];
+    }
+
+    // Time filter
     if (time) {
       const now = new Date();
-      // Your existing time filter logic...
+      let fromDate = null;
+
+      switch (time) {
+        case "24h":
+          fromDate = new Date(now.setDate(now.getDate() - 1));
+          break;
+        case "week":
+          fromDate = new Date(now.setDate(now.getDate() - 7));
+          break;
+        case "month":
+          fromDate = new Date(now.setMonth(now.getMonth() - 1));
+          break;
+        case "6months":
+          fromDate = new Date(now.setMonth(now.getMonth() - 6));
+          break;
+        case "1year":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 1));
+          break;
+        case "2years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 2));
+          break;
+        case "3years":
+          fromDate = new Date(now.setFullYear(now.getFullYear() - 3));
+          break;
+        default:
+          break;
+      }
+
+      if (fromDate) {
+        filter.createdAt = { $gte: fromDate };
+      }
     }
 
-    let query = News.find(filter)
-      .populate("postedBy", "fullName email")
-      .sort({ createdAt: -1 });
+    // Count total docs for pagination
+    const totalItems = await News.countDocuments(filter);
 
-    let totalItems;
-    let hasNextPage = false;
-    let hasPrevPage = false;
-    let nextCursor = null;
-    let prevCursor = null;
+    // Fetch paginated news
+    const news = await News.find(filter)
+      .populate("postedBy", "fullName profileUrl") // adjust fields if needed
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
 
-    if (cursor) {
-      // Cursor-based pagination
-      const cursorDate = new Date(cursor);
-      if (isNaN(cursorDate)) {
-        return res.status(400).json({
-          status: "fail",
-          message: "Invalid cursor date",
-        });
-      }
-
-      if (direction === "next") {
-        query = query.where("createdAt").lt(cursorDate);
-      } else if (direction === "prev") {
-        query = query.where("createdAt").gt(cursorDate).sort({ createdAt: 1 });
-      }
-
-      query = query.limit(limitNum);
-      const news = await query.lean();
-
-      // For prev direction, we need to reverse the results
-      if (direction === "prev") {
-        news.reverse();
-      }
-
-      // Get cursors for navigation
-      if (news.length > 0) {
-        nextCursor = news[news.length - 1]?.createdAt;
-        prevCursor = news[0]?.createdAt;
-      }
-
-      // Check if more pages exist
-      const nextCheck = await News.findOne({
-        ...filter,
-        createdAt: { $lt: nextCursor },
-      }).select("createdAt");
-
-      const prevCheck = await News.findOne({
-        ...filter,
-        createdAt: { $gt: prevCursor },
-      }).select("createdAt");
-
-      hasNextPage = !!nextCheck;
-      hasPrevPage = !!prevCheck;
-
-      totalItems = await News.countDocuments(filter);
-
-      return res.status(200).json({
-        status: "success",
-        news,
-        pagination: {
-          totalItems,
-          currentCursor: cursor,
-          nextCursor: nextCursor?.toISOString(),
-          prevCursor: prevCursor?.toISOString(),
-          hasNextPage,
-          hasPrevPage,
-          itemsPerPage: limitNum,
-        },
-      });
-    } else if (page) {
-      // Fallback to offset pagination
-      const pageNum = Math.max(1, parseInt(page));
-      const skip = (pageNum - 1) * limitNum;
-
-      const [news, total] = await Promise.all([
-        query.skip(skip).limit(limitNum).lean(),
-        News.countDocuments(filter),
-      ]);
-
-      const totalPages = Math.ceil(total / limitNum);
-
-      return res.status(200).json({
-        status: "success",
-        news,
-        pagination: {
-          totalItems: total,
-          currentPage: pageNum,
-          totalPages,
-          itemsPerPage: limitNum,
-          hasNextPage: pageNum < totalPages,
-          hasPrevPage: pageNum > 1,
-        },
-      });
-    } else {
-      // First page load
-      const news = await query.limit(limitNum).lean();
-      totalItems = await News.countDocuments(filter);
-
-      if (news.length > 0) {
-        nextCursor = news[news.length - 1]?.createdAt;
-      }
-
-      hasNextPage = news.length === limitNum;
-
-      return res.status(200).json({
-        status: "success",
-        news,
-        pagination: {
-          totalItems,
-          nextCursor: nextCursor?.toISOString(),
-          hasNextPage,
-          hasPrevPage: false,
-          itemsPerPage: limitNum,
-        },
-      });
-    }
+    return res.json({
+      news,
+      pagination: {
+        currentPage: page,
+        perPage: limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+      status: "success",
+    });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ status: "fail", message: error.message });
+    console.error("Error fetching filtered news:", error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -325,13 +289,79 @@ export const getNewsById = async (req, res) => {
       });
     }
 
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const suggestedNews = await News.aggregate([
+      {
+        $match: {
+          newsId: { $ne: newsId },
+          createdAt: { $gte: oneWeekAgo },
+        },
+      },
+      { $sample: { size: 20 } },
+    ]);
+
     return res.status(200).json({
       status: "success",
       news,
+      suggestedNews,
     });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ status: "fail", message: error.message });
+  }
+};
+
+// Get News by NewsId
+export const getNewsByNewsId = async (req, res) => {
+  try {
+    const { newsId } = req.params;
+
+    if (!newsId) {
+      return res.status(400).json({
+        status: "fail",
+        message: "newsId parameter is required",
+      });
+    }
+
+    const post = await News.findOne({ newsId })
+      .populate("postedBy", "fullName profileUrl")
+      .exec();
+
+    if (!post) {
+      return res.status(404).json({
+        status: "fail",
+        message: "News not found",
+      });
+    }
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const suggestedNews = await News.aggregate([
+      {
+        $match: {
+          newsId: { $ne: newsId },
+          createdAt: { $gte: oneWeekAgo },
+        },
+      },
+      { $sample: { size: 20 } },
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      message: "News fetched successfully",
+      news: post,
+      suggestedNews,
+    });
+  } catch (error) {
+    console.error("Error fetching news:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "An error occurred while fetching the news",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
   }
 };
 
@@ -390,6 +420,19 @@ export const editNews = async (req, res) => {
       mainUrl = uploadResult.Location;
     }
 
+    // ✅ Clear old audio files if they exist
+    if (news.newsAudio) {
+      news.newsAudio.en = null;
+      news.newsAudio.te = null;
+    }
+
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
+
     // ✅ Update fields
     news.title.en = titleEn || news.title.en;
     news.title.te = titleTe || news.title.te;
@@ -399,6 +442,8 @@ export const editNews = async (req, res) => {
     news.category.te = categoryTe || news.category.te;
     news.subCategory.en = subCategoryEn || news.subCategory.en;
     news.subCategory.te = subCategoryTe || news.subCategory.te;
+    news.newsAudio.en = audioFiles.enAudio || news.newsAudio.en;
+    news.newsAudio.te = audioFiles.teAudio || news.newsAudio.te;
     news.tags.en = tagsEn
       ? tagsEn.split(",").map((t) => t.trim())
       : news.tags.en;
@@ -460,6 +505,178 @@ export const deleteNews = async (req, res) => {
     return res.status(200).json({
       status: "success",
       message: "News deleted successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: "fail", message: error.message });
+  }
+};
+
+//========= Frontend =========
+export const getCategoryNews = async (req, res) => {
+  try {
+    const { category, subcategory, page = 1, limit = 12 } = req.query;
+
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 12;
+    const safePage = Math.max(pageNum, 1);
+    const safeLimit = Math.min(Math.max(limitNum, 1), 100);
+
+    const filter = {};
+    if (category) filter["category.en"] = category;
+    if (subcategory) filter["subCategory.en"] = subcategory;
+
+    const total = await News.countDocuments(filter);
+
+    const news = await News.find(filter)
+      .populate("postedBy", "fullName profileUrl")
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean()
+      .exec();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Fetched News successfully",
+      news,
+      total,
+      page: safePage,
+      lastPage: Math.ceil(total / safeLimit),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: "fail", message: error.message });
+  }
+};
+
+export const addReaction = async (req, res) => {
+  try {
+    const { newsId } = req.params;
+    const { type } = req.body;
+    const userId = req.user.user?._id;
+
+    if (!newsId) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "News id not found!" });
+    }
+
+    if (!type) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "Reaction type is not found!" });
+    }
+
+    if (!userId) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "User id not found!" });
+    }
+
+    const news = await News.findById(newsId);
+    if (!news) {
+      return res
+        .status(404)
+        .send({ status: "fail", message: "News post not found" });
+    }
+
+    const existingReactionIndex = news.reactions.findIndex(
+      (reaction) => reaction.userId.toString() === userId.toString()
+    );
+
+    if (existingReactionIndex >= 0) {
+      news.reactions[existingReactionIndex].type = type;
+    } else {
+      news.reactions.push({ userId, type });
+    }
+
+    await news.save();
+
+    res.status(200).send({
+      status: "success",
+      message: "Reaction added/updated successfully",
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).send({
+      status: "fail",
+      message: error.message,
+    });
+  }
+};
+
+//========= Home News =========
+export const getLatestNews = async (req, res) => {
+  try {
+    const news = await News.find()
+      .populate("postedBy", "fullName profileUrl")
+      .sort({ createdAt: -1 }) // Sort by newest first
+      .limit(10) // Limit to latest 10 news
+      .exec();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Fetched latest 10 News successfully",
+      news,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: "fail",
+      message: error.message,
+    });
+  }
+};
+
+export const getTrendingNews = async (req, res) => {
+  try {
+    // 7 days ago date
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const trendingNews = await News.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: oneWeekAgo }, // only news from last 7 days
+        },
+      },
+      // Lookup comments count
+      {
+        $lookup: {
+          from: "comments", // your comments collection name
+          localField: "_id",
+          foreignField: "news", // field in Comments that links to News
+          as: "commentsData",
+        },
+      },
+      {
+        $addFields: {
+          commentsCount: { $size: "$commentsData" },
+          reactionsCount: { $size: "$reactions" }, // assuming reactions is an array
+        },
+      },
+      {
+        $sort: {
+          reactionsCount: -1,
+          commentsCount: -1,
+        },
+      },
+      {
+        $limit: 10, // get top 10
+      },
+    ]);
+
+    // Populate postedBy manually after aggregation
+    const populatedNews = await News.populate(trendingNews, {
+      path: "postedBy",
+      select: "fullName profileUrl",
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Trending news fetched successfully",
+      news: populatedNews,
     });
   } catch (error) {
     console.error(error);
