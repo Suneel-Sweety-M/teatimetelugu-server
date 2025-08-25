@@ -114,39 +114,97 @@ export const getFilteredVideos = async (req, res) => {
       ];
     }
 
-    // Time filter
     if (time) {
       const now = new Date();
       let fromDate = null;
 
       switch (time) {
+        // ✅ Within filters
         case "24h":
-          fromDate = new Date(now.setDate(now.getDate() - 1));
+          fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          filter.createdAt = { $gte: fromDate };
           break;
         case "week":
-          fromDate = new Date(now.setDate(now.getDate() - 7));
+          fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          filter.createdAt = { $gte: fromDate };
           break;
         case "month":
-          fromDate = new Date(now.setMonth(now.getMonth() - 1));
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 1,
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "6months":
-          fromDate = new Date(now.setMonth(now.getMonth() - 6));
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 6,
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "1year":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 1));
+          fromDate = new Date(
+            now.getFullYear() - 1,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "2years":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 2));
+          fromDate = new Date(
+            now.getFullYear() - 2,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "3years":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 3));
+          fromDate = new Date(
+            now.getFullYear() - 3,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
+
+        // ✅ Above filters (older than)
+        case "above6months":
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 6,
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above1year":
+          fromDate = new Date(
+            now.getFullYear() - 1,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above2years":
+          fromDate = new Date(
+            now.getFullYear() - 2,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above3years":
+          fromDate = new Date(
+            now.getFullYear() - 3,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+
         default:
           break;
-      }
-
-      if (fromDate) {
-        filter.createdAt = { $gte: fromDate };
       }
     }
 

@@ -293,6 +293,15 @@ export const refreshToken = async (req, res) => {
   }
 };
 
+export const joinWithGoogle = (req, res) => {
+  const client = req.query.client;
+  
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    state: client,
+  })(req, res);
+};
+
 export const googleCallback = (req, res) => {
   passport.authenticate("google", { session: false }, async (err, data) => {
     if (err || !data) {
@@ -304,7 +313,7 @@ export const googleCallback = (req, res) => {
     const { user } = data;
 
     // Get client URL from query
-    let { client } = req.query;
+    let client = req.query.state;
     const allowedClients = process.env.CLIENT_URLS.split(",");
 
     // Fallback to first allowed URL if client is missing or invalid

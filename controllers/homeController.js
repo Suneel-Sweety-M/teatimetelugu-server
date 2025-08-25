@@ -708,7 +708,6 @@ export const addMovieReleases = async (req, res) => {
 export const getMovieReleases = async (req, res) => {
   try {
     const assets = await Home.findOne({}, "movieReleases");
-    console.log(assets);
 
     if (!assets || !assets.movieReleases) {
       return res
@@ -1063,13 +1062,6 @@ export const setPopupPoster = async (req, res) => {
   try {
     const { img, link } = req.body;
 
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
-
     const updatedAsset = await Home.findOneAndUpdate(
       {},
       { $set: { "posters.popupPoster": { img, link } } },
@@ -1126,13 +1118,6 @@ export const getMoviePoster = async (req, res) => {
 export const setMoviePoster = async (req, res) => {
   try {
     const { img, link } = req.body;
-
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
 
     const updatedAsset = await Home.findOneAndUpdate(
       {},
@@ -1192,13 +1177,6 @@ export const setNavbarAd = async (req, res) => {
   try {
     const { img, link } = req.body;
 
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'image' and 'link' are required!",
-      });
-    }
-
     const updatedAsset = await Home.findOneAndUpdate(
       {},
       { $set: { "posters.navbarAd": { img, link } } },
@@ -1256,13 +1234,6 @@ export const setHomeLongAd = async (req, res) => {
   try {
     const { img, link } = req.body;
 
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
-
     const updatedAsset = await Home.findOneAndUpdate(
       {},
       { $set: { "ads.homeLongAd": { img, link } } },
@@ -1312,13 +1283,6 @@ export const getHomeShortAd = async (req, res) => {
 export const setHomeShortAd = async (req, res) => {
   try {
     const { img, link } = req.body;
-
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
 
     const updatedAsset = await Home.findOneAndUpdate(
       {},
@@ -1370,13 +1334,6 @@ export const setCategoryLongAd = async (req, res) => {
   try {
     const { img, link } = req.body;
 
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
-
     const updatedAsset = await Home.findOneAndUpdate(
       {},
       { $set: { "ads.categoryLongAd": { img, link } } },
@@ -1426,13 +1383,6 @@ export const getCategoryShortAd = async (req, res) => {
 export const setCategoryShortAd = async (req, res) => {
   try {
     const { img, link } = req.body;
-
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
 
     const updatedAsset = await Home.findOneAndUpdate(
       {},
@@ -1484,13 +1434,6 @@ export const setNewsLongAd = async (req, res) => {
   try {
     const { img, link } = req.body;
 
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
-
     const updatedAsset = await Home.findOneAndUpdate(
       {},
       { $set: { "ads.newsLongAd": { img, link } } },
@@ -1540,13 +1483,6 @@ export const getNewsShortAd = async (req, res) => {
 export const setNewsShortAd = async (req, res) => {
   try {
     const { img, link } = req.body;
-
-    if (!img || !link) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Both 'img' and 'link' are required!",
-      });
-    }
 
     const updatedAsset = await Home.findOneAndUpdate(
       {},

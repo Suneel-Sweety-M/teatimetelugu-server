@@ -1,15 +1,15 @@
 import { Router } from "express";
 import {
   googleCallback,
+  joinWithGoogle,
   login,
   logout,
   register,
 } from "../controllers/authController.js";
-import passport from "passport";
 
 const router = Router();
 
-router.get("/join-with-google", passport.authenticate("google", { scope: ["profile", "email"] })); 
+router.get("/join-with-google", joinWithGoogle);
 router.get("/google/callback", googleCallback);
 
 router.post("/register", register);

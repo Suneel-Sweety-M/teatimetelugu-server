@@ -209,33 +209,92 @@ export const getFilteredNews = async (req, res) => {
       let fromDate = null;
 
       switch (time) {
+        // ✅ Within filters
         case "24h":
-          fromDate = new Date(now.setDate(now.getDate() - 1));
+          fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          filter.createdAt = { $gte: fromDate };
           break;
         case "week":
-          fromDate = new Date(now.setDate(now.getDate() - 7));
+          fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          filter.createdAt = { $gte: fromDate };
           break;
         case "month":
-          fromDate = new Date(now.setMonth(now.getMonth() - 1));
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 1,
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "6months":
-          fromDate = new Date(now.setMonth(now.getMonth() - 6));
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 6,
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "1year":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 1));
+          fromDate = new Date(
+            now.getFullYear() - 1,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "2years":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 2));
+          fromDate = new Date(
+            now.getFullYear() - 2,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
         case "3years":
-          fromDate = new Date(now.setFullYear(now.getFullYear() - 3));
+          fromDate = new Date(
+            now.getFullYear() - 3,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $gte: fromDate };
           break;
+
+        // ✅ Above filters (older than)
+        case "above6months":
+          fromDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 6,
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above1year":
+          fromDate = new Date(
+            now.getFullYear() - 1,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above2years":
+          fromDate = new Date(
+            now.getFullYear() - 2,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+        case "above3years":
+          fromDate = new Date(
+            now.getFullYear() - 3,
+            now.getMonth(),
+            now.getDate()
+          );
+          filter.createdAt = { $lt: fromDate };
+          break;
+
         default:
           break;
-      }
-
-      if (fromDate) {
-        filter.createdAt = { $gte: fromDate };
       }
     }
 
@@ -244,7 +303,7 @@ export const getFilteredNews = async (req, res) => {
 
     // Fetch paginated news
     const news = await News.find(filter)
-      .populate("postedBy", "fullName profileUrl") // adjust fields if needed
+      .populate("postedBy", "fullName profileUrl")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
@@ -295,7 +354,7 @@ export const getNewsById = async (req, res) => {
     const suggestedNews = await News.aggregate([
       {
         $match: {
-          newsId: { $ne: newsId },
+          newsId: { $ne: id },
           createdAt: { $gte: oneWeekAgo },
         },
       },
@@ -488,12 +547,9 @@ export const deleteNews = async (req, res) => {
       });
     }
 
-    // ✅ Only author or admin can delete
+    // ✅ Only writer or admin can delete
     const currentUser = await Users.findById(user?._id);
-    if (
-      news.postedBy.toString() !== user._id.toString() &&
-      currentUser.role !== "admin"
-    ) {
+    if (currentUser.role !== "writer" && currentUser.role !== "admin") {
       return res.status(403).json({
         status: "fail",
         message: "You are not authorized to delete this news!",
