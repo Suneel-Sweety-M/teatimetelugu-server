@@ -13,7 +13,10 @@ export const addVideo = async (req, res) => {
       });
     }
 
-    if (user?.role !== "admin" && user?.role !== "writer") {
+    if (
+      (user?.role !== "admin" && user?.role !== "writer") ||
+      user?.isActive === false
+    ) {
       return res.status(403).json({
         status: "fail",
         message: "You do not have permission to add videos.",
@@ -49,12 +52,25 @@ export const addVideo = async (req, res) => {
 export const deleteVideo = async (req, res) => {
   try {
     const { id } = req.params;
+    const { user } = req.user;
+
     if (!id) {
       return res.status(400).json({
         status: "fail",
         message: "Video ID is required",
       });
     }
+
+    if (
+      (user?.role !== "admin" && user?.role !== "writer") ||
+      user?.isActive === false
+    ) {
+      return res.status(403).json({
+        status: "fail",
+        message: "You do not have permission to add videos.",
+      });
+    }
+
     const video = await Videos.findByIdAndDelete(id);
 
     if (!video) {

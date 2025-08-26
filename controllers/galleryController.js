@@ -46,7 +46,7 @@ export const addGallery = async (req, res) => {
 
     const currentUser = await Users.findById(user?._id);
     if (
-      (currentUser.role === "admin" || currentUser.role === "writer") &&
+      (currentUser.role !== "admin" && currentUser.role !== "writer") ||
       currentUser.isActive === false
     ) {
       return res
@@ -469,7 +469,7 @@ export const editGallery = async (req, res) => {
 
     const currentUser = await Users.findById(user?._id);
     if (
-      (currentUser.role === "admin" || currentUser.role === "writer") &&
+      (currentUser.role !== "admin" && currentUser.role !== "writer") ||
       currentUser.isActive === false
     ) {
       return res
@@ -595,7 +595,7 @@ export const deleteGallery = async (req, res) => {
 
     const currentUser = await Users.findById(user._id);
     if (
-      (currentUser.role === "admin" || currentUser.role === "writer") &&
+      (currentUser.role !== "admin" && currentUser.role !== "writer") ||
       currentUser.isActive === false
     ) {
       return res

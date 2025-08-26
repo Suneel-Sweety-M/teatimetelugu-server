@@ -68,7 +68,7 @@ export const addNews = async (req, res) => {
     const currentUser = await Users.findById(user?._id);
 
     if (
-      (currentUser?.role === "admin" || currentUser?.role === "writer") &&
+      (currentUser?.role !== "admin" && currentUser?.role !== "writer") ||
       currentUser?.isActive === false
     ) {
       return res.status(403).json({
@@ -463,8 +463,8 @@ export const editNews = async (req, res) => {
     // ✅ Only the author or admin can edit
     const currentUser = await Users.findById(user?._id);
     if (
-      news.postedBy.toString() !== user._id.toString() &&
-      currentUser.role !== "admin"
+      (currentUser.role !== "writer" && currentUser.role !== "admin") ||
+      currentUser.isActive === false
     ) {
       return res.status(403).json({
         status: "fail",
@@ -549,7 +549,10 @@ export const deleteNews = async (req, res) => {
 
     // ✅ Only writer or admin can delete
     const currentUser = await Users.findById(user?._id);
-    if (currentUser.role !== "writer" && currentUser.role !== "admin") {
+    if (
+      (currentUser.role !== "writer" && currentUser.role !== "admin") ||
+      currentUser.isActive === false
+    ) {
       return res.status(403).json({
         status: "fail",
         message: "You are not authorized to delete this news!",
