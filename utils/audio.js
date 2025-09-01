@@ -1,5 +1,4 @@
 import axios from "axios";
-import News from "../models/newsModel.js";
 
 function htmlToSsmlForEn(html) {
   let ssml = html;
