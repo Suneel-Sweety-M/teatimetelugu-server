@@ -90,12 +90,12 @@ export const addNews = async (req, res) => {
 
     // ✅ Generate unique newsId
     const newsId = await generateUniqueSlug(News, titleEn);
-    const audioFiles = await generateAudioForTexts({
-      enTitle: titleEn,
-      enDescription: descriptionEn,
-      teTitle: titleTe,
-      teDescription: descriptionTe,
-    });
+    // const audioFiles = await generateAudioForTexts({
+    //   enTitle: titleEn,
+    //   enDescription: descriptionEn,
+    //   teTitle: titleTe,
+    //   teDescription: descriptionTe,
+    // });
 
     // ✅ Create new post
     const newPost = new News({
@@ -118,10 +118,10 @@ export const addNews = async (req, res) => {
         en: subCategoryEn || "",
         te: subCategoryTe || "",
       },
-      newsAudio: {
-        en: audioFiles.en,
-        te: audioFiles.te,
-      },
+      // newsAudio: {
+      //   en: audioFiles.en,
+      //   te: audioFiles.te,
+      // },
       tags: {
         en: tagsEn ? tagsEn.split(",").map((t) => t.trim()) : [],
         te: tagsTe ? tagsTe.split(",").map((t) => t.trim()) : [],
@@ -478,27 +478,27 @@ export const editNews = async (req, res) => {
     }
 
     // ✅ Detect changes for audio
-    const enChanged =
-      (titleEn && titleEn !== news.title.en) ||
-      (descriptionEn && descriptionEn !== news.description.en);
+    // const enChanged =
+    //   (titleEn && titleEn !== news.title.en) ||
+    //   (descriptionEn && descriptionEn !== news.description.en);
 
-    const teChanged =
-      (titleTe && titleTe !== news.title.te) ||
-      (descriptionTe && descriptionTe !== news.description.te);
+    // const teChanged =
+    //   (titleTe && titleTe !== news.title.te) ||
+    //   (descriptionTe && descriptionTe !== news.description.te);
 
-    let audioFiles = {};
-    if (enChanged || teChanged) {
-      // Clear only if regenerating
-      if (enChanged) news.newsAudio.en = null;
-      if (teChanged) news.newsAudio.te = null;
+    // let audioFiles = {};
+    // if (enChanged || teChanged) {
+    //   // Clear only if regenerating
+    //   if (enChanged) news.newsAudio.en = null;
+    //   if (teChanged) news.newsAudio.te = null;
 
-      audioFiles = await generateAudioForTexts({
-        enTitle: enChanged ? titleEn : news.title.en,
-        enDescription: enChanged ? descriptionEn : news.description.en,
-        teTitle: teChanged ? titleTe : news.title.te,
-        teDescription: teChanged ? descriptionTe : news.description.te,
-      });
-    }
+    //   audioFiles = await generateAudioForTexts({
+    //     enTitle: enChanged ? titleEn : news.title.en,
+    //     enDescription: enChanged ? descriptionEn : news.description.en,
+    //     teTitle: teChanged ? titleTe : news.title.te,
+    //     teDescription: teChanged ? descriptionTe : news.description.te,
+    //   });
+    // }
 
     // ✅ Update only changed fields
     if (titleEn) news.title.en = titleEn;
@@ -515,8 +515,8 @@ export const editNews = async (req, res) => {
     if (mainUrl) news.mainUrl = mainUrl;
 
     // ✅ Assign new audio if generated
-    if (audioFiles.en) news.newsAudio.en = audioFiles.en;
-    if (audioFiles.te) news.newsAudio.te = audioFiles.te;
+    // if (audioFiles.en) news.newsAudio.en = audioFiles.en;
+    // if (audioFiles.te) news.newsAudio.te = audioFiles.te;
 
     await news.save();
 
