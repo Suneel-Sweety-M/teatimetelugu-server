@@ -4,6 +4,10 @@ function htmlToSsmlForEn(html) {
   let ssml = html;
 
   // ===== Handle Jodit-specific formatting =====
+  // Replace non-breaking spaces with normal spaces
+  ssml = ssml.replace(/&nbsp;/g, " ");
+  ssml = ssml.replace(/\s+/g, " ").trim();
+
   // Bold text (font-weight or <strong>)
   ssml = ssml.replace(
     /<(span|strong)[^>]*style="[^"]*font-weight:\s*(bold|700|800|900)[^"]*"[^>]*>(.*?)<\/\1>/gi,
@@ -52,13 +56,17 @@ function htmlToSsmlForEn(html) {
   ssml = ssml.replace(/<\/?[^>]+(>|$)/g, "");
 
   // ===== Final SSML Wrapping =====
-  ssml = `${ssml}`;
+  ssml = `<speak>${ssml}</speak>`;
 
   return ssml;
 }
 
 function htmlToSsmlForTe(html) {
   let ssml = html;
+
+  // Replace non-breaking spaces with normal spaces
+  ssml = ssml.replace(/&nbsp;/g, " ");
+  ssml = ssml.replace(/\s+/g, " ").trim();
 
   // Ensure commas read properly
   ssml = ssml.replace(/,(\S)/g, ", $1"); // insert missing spaces
@@ -84,7 +92,7 @@ function htmlToSsmlForTe(html) {
   // Remove leftover tags
   ssml = ssml.replace(/<\/?[^>]+(>|$)/g, "");
 
-  return `${ssml}`;
+  return `<speak>${ssml}</speak>`;
 }
 
 export const generateAudioForTexts = async ({
@@ -106,14 +114,14 @@ export const generateAudioForTexts = async ({
     const teSsml = htmlToSsmlForTe(teText);
 
     // Helper for Google TTS request
-    const synthesize = async (text, languageCode, voiceName) => {
+    const synthesize = async (ssml, languageCode, voiceName) => {
       const payload = {
         audioConfig: {
           audioEncoding: "MP3",
           pitch: 0,
           speakingRate: 1,
         },
-        input: { text },
+        input: { ssml },
         voice: { languageCode, name: voiceName },
       };
       const res = await axios.post(endpoint, payload);
@@ -122,8 +130,10 @@ export const generateAudioForTexts = async ({
 
     // Generate both audios in parallel
     const [enAudio, teAudio] = await Promise.all([
-      synthesize(enSsml, "en-IN", "en-IN-Chirp3-HD-Achernar"),
-      synthesize(teSsml, "te-IN", "te-IN-Chirp3-HD-Achernar"),
+      // synthesize(enSsml, "en-IN", "en-IN-Chirp3-HD-Achernar"),
+      // synthesize(teSsml, "te-IN", "te-IN-Chirp3-HD-Achird"),
+      synthesize(enSsml, "en-IN", "en-IN-Wavenet-D"),
+      synthesize(teSsml, "te-IN", "te-IN-Standard-A"),
     ]);
 
     // ✅ Return without saving to any DB
@@ -132,7 +142,7 @@ export const generateAudioForTexts = async ({
       te: teAudio,
     };
   } catch (err) {
-    console.error("Error generating audio:", err.message);
+    console.error("Error while generating audio:", err.message);
     throw err;
   }
 };

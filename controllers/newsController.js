@@ -424,7 +424,7 @@ export const getNewsByNewsId = async (req, res) => {
   }
 };
 
-// ✅ Edit News
+// ✅ Edit News by ID
 export const editNews = async (req, res) => {
   try {
     const { id } = req.params;
@@ -450,17 +450,15 @@ export const editNews = async (req, res) => {
     } = req.body;
 
     const { user } = req.user;
-
     const news = await News.findById(id);
 
     if (!news) {
-      return res.status(404).json({
-        status: "fail",
-        message: "News not found!",
-      });
+      return res
+        .status(404)
+        .json({ status: "fail", message: "News not found!" });
     }
 
-    // ✅ Only the author or admin can edit
+    // ✅ Only author or admin can edit
     const currentUser = await Users.findById(user?._id);
     if (
       (currentUser.role !== "writer" && currentUser.role !== "admin") ||
@@ -472,45 +470,53 @@ export const editNews = async (req, res) => {
       });
     }
 
-    // ✅ Upload new image if provided
+    // ✅ Upload new image only if provided
     let mainUrl = news.mainUrl;
     if (req.file) {
       const uploadResult = await uploadFile(req.file);
       mainUrl = uploadResult.Location;
     }
 
-    // ✅ Clear old audio files if they exist
-    if (news.newsAudio) {
-      news.newsAudio.en = null;
-      news.newsAudio.te = null;
+    // ✅ Detect changes for audio
+    const enChanged =
+      (titleEn && titleEn !== news.title.en) ||
+      (descriptionEn && descriptionEn !== news.description.en);
+
+    const teChanged =
+      (titleTe && titleTe !== news.title.te) ||
+      (descriptionTe && descriptionTe !== news.description.te);
+
+    let audioFiles = {};
+    if (enChanged || teChanged) {
+      // Clear only if regenerating
+      if (enChanged) news.newsAudio.en = null;
+      if (teChanged) news.newsAudio.te = null;
+
+      audioFiles = await generateAudioForTexts({
+        enTitle: enChanged ? titleEn : news.title.en,
+        enDescription: enChanged ? descriptionEn : news.description.en,
+        teTitle: teChanged ? titleTe : news.title.te,
+        teDescription: teChanged ? descriptionTe : news.description.te,
+      });
     }
 
-    const audioFiles = await generateAudioForTexts({
-      enTitle: titleEn,
-      enDescription: descriptionEn,
-      teTitle: titleTe,
-      teDescription: descriptionTe,
-    });
+    // ✅ Update only changed fields
+    if (titleEn) news.title.en = titleEn;
+    if (titleTe) news.title.te = titleTe;
+    if (descriptionEn) news.description.en = descriptionEn;
+    if (descriptionTe) news.description.te = descriptionTe;
+    if (categoryEn) news.category.en = categoryEn;
+    if (categoryTe) news.category.te = categoryTe;
+    if (subCategoryEn) news.subCategory.en = subCategoryEn;
+    if (subCategoryTe) news.subCategory.te = subCategoryTe;
+    if (tagsEn) news.tags.en = tagsEn.split(",").map((t) => t.trim());
+    if (tagsTe) news.tags.te = tagsTe.split(",").map((t) => t.trim());
+    if (typeof movieRating !== "undefined") news.movieRating = movieRating;
+    if (mainUrl) news.mainUrl = mainUrl;
 
-    // ✅ Update fields
-    news.title.en = titleEn || news.title.en;
-    news.title.te = titleTe || news.title.te;
-    news.description.en = descriptionEn || news.description.en;
-    news.description.te = descriptionTe || news.description.te;
-    news.category.en = categoryEn || news.category.en;
-    news.category.te = categoryTe || news.category.te;
-    news.subCategory.en = subCategoryEn || news.subCategory.en;
-    news.subCategory.te = subCategoryTe || news.subCategory.te;
-    news.newsAudio.en = audioFiles.enAudio || news.newsAudio.en;
-    news.newsAudio.te = audioFiles.teAudio || news.newsAudio.te;
-    news.tags.en = tagsEn
-      ? tagsEn.split(",").map((t) => t.trim())
-      : news.tags.en;
-    news.tags.te = tagsTe
-      ? tagsTe.split(",").map((t) => t.trim())
-      : news.tags.te;
-    news.movieRating = movieRating ?? news.movieRating;
-    news.mainUrl = mainUrl;
+    // ✅ Assign new audio if generated
+    if (audioFiles.en) news.newsAudio.en = audioFiles.en;
+    if (audioFiles.te) news.newsAudio.te = audioFiles.te;
 
     await news.save();
 

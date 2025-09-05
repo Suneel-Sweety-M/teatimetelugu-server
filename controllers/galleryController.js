@@ -418,7 +418,7 @@ export const editGallery = async (req, res) => {
       categoryTe,
       tagsEn,
       tagsTe,
-      removedImages, // This will be a JSON string now
+      removedImages, // JSON string or array
     } = req.body;
 
     const { user } = req.user;
@@ -429,23 +429,18 @@ export const editGallery = async (req, res) => {
         .json({ status: "fail", message: "ID is required" });
     }
 
-    // ✅ Parse removedImages from JSON string
+    // ✅ Parse removed images safely
     let imagesToRemove = [];
     try {
       if (removedImages) {
         imagesToRemove = JSON.parse(removedImages);
       }
-    } catch (parseError) {
-      console.error("Error parsing removedImages:", parseError);
-      // If parsing fails, try to handle as string or array
-      if (typeof removedImages === "string") {
-        imagesToRemove = [removedImages];
-      } else if (Array.isArray(removedImages)) {
-        imagesToRemove = removedImages;
-      }
+    } catch {
+      if (typeof removedImages === "string") imagesToRemove = [removedImages];
+      else if (Array.isArray(removedImages)) imagesToRemove = removedImages;
     }
 
-    // Rest of your validation...
+    // ✅ Required fields validation
     if (
       !titleEn ||
       !titleTe ||
@@ -461,22 +456,27 @@ export const editGallery = async (req, res) => {
         .json({ status: "fail", message: "All fields required!" });
     }
 
+    // ✅ User validation
     if (!user) {
       return res
         .status(404)
         .json({ status: "fail", message: "User not found!" });
     }
 
-    const currentUser = await Users.findById(user?._id);
-    if (
-      (currentUser.role !== "admin" && currentUser.role !== "writer") ||
-      currentUser.isActive === false
-    ) {
+    const currentUser = await Users.findById(user._id);
+    if (!currentUser || currentUser.isActive === false) {
       return res
         .status(403)
-        .json({ status: "fail", message: "You don't have permission!" });
+        .json({ status: "fail", message: "User not authorized!" });
     }
 
+    if (currentUser.role !== "admin" && currentUser.role !== "writer") {
+      return res
+        .status(403)
+        .json({ status: "fail", message: "Permission denied!" });
+    }
+
+    // ✅ Gallery check
     const gallery = await Gallery.findById(id);
     if (!gallery) {
       return res
@@ -484,28 +484,18 @@ export const editGallery = async (req, res) => {
         .json({ status: "fail", message: "Gallery not found!" });
     }
 
-    if (
-      gallery.postedBy.toString() !== user._id.toString() &&
-      currentUser.role !== "admin"
-    ) {
-      return res.status(403).json({ status: "fail", message: "Unauthorized!" });
-    }
-
-    // ✅ Remove images from gallery
+    // ✅ Remove images if requested
     if (imagesToRemove.length > 0) {
-      const originalLength = gallery.galleryPics.length;
-
       gallery.galleryPics = gallery.galleryPics.filter((img) => {
         const imageUrl = typeof img === "string" ? img : img.url;
         return !imagesToRemove.includes(imageUrl);
       });
 
-      // Delete files from storage
       for (const imgUrl of imagesToRemove) {
         try {
-          await deleteFile(imgUrl);
+          await deleteFile(imgUrl); // S3 delete
         } catch (err) {
-          console.error("Delete error:", err.message);
+          console.error("Image delete error:", err.message);
         }
       }
     }
@@ -514,7 +504,7 @@ export const editGallery = async (req, res) => {
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         try {
-          const uploadResult = await uploadFile(file);
+          const uploadResult = await uploadFile(file); // S3 upload
           gallery.galleryPics.push(uploadResult.Location);
         } catch (uploadError) {
           console.error("File upload failed:", uploadError.message);
@@ -528,18 +518,18 @@ export const editGallery = async (req, res) => {
     gallery.description = { en: descriptionEn, te: descriptionTe };
     gallery.category = { en: categoryEn, te: categoryTe };
 
-    // Handle tags
+    // ✅ Handle tags (combine en + te properly)
     const englishTags = tagsEn
       ? tagsEn
           .split(",")
           .map((t) => t.trim())
-          .filter((t) => t)
+          .filter(Boolean)
       : [];
     const teluguTags = tagsTe
       ? tagsTe
           .split(",")
           .map((t) => t.trim())
-          .filter((t) => t)
+          .filter(Boolean)
       : [];
 
     gallery.tags = [
@@ -549,14 +539,12 @@ export const editGallery = async (req, res) => {
 
     // ✅ Regenerate slug if title changed
     if (gallery.title.en !== titleEn) {
-      const newsId = await generateUniqueSlug(Gallery, titleEn, id);
-      gallery.newsId = newsId;
+      const galleryId = await generateUniqueSlug(Gallery, titleEn, id);
+      gallery.newsId = galleryId;
     }
 
-    if (gallery.newsAudio) {
-      gallery.newsAudio.en = null;
-      gallery.newsAudio.te = null;
-    }
+    // ✅ Reset and regenerate audio
+    gallery.newsAudio = null;
 
     const audioFiles = await generateAudioForTexts({
       enTitle: titleEn,
@@ -576,10 +564,7 @@ export const editGallery = async (req, res) => {
     });
   } catch (error) {
     console.error("Edit Gallery Error:", error);
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-    });
+    res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
 
@@ -608,14 +593,6 @@ export const deleteGallery = async (req, res) => {
       return res
         .status(404)
         .json({ status: "fail", message: "Gallery not found!" });
-
-    if (
-      gallery.postedBy.toString() !== user._id.toString() &&
-      currentUser.role !== "admin" &&
-      currentUser.role !== "writer"
-    ) {
-      return res.status(403).json({ status: "fail", message: "Unauthorized!" });
-    }
 
     // ✅ Delete images from S3
     for (const img of gallery.galleryPics) {
