@@ -95,6 +95,25 @@ function htmlToSsmlForTe(html) {
   return `<speak>${ssml}</speak>`;
 }
 
+// Helper function to validate and clean SSML
+function validateAndCleanSsml(ssml) {
+  // Ensure proper SSML structure
+  if (!ssml.startsWith("<speak>")) {
+    ssml = `<speak>${ssml}`;
+  }
+  if (!ssml.endsWith("</speak>")) {
+    ssml = `${ssml}</speak>`;
+  }
+
+  // Remove any invalid characters that might break the XML
+  ssml = ssml.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+
+  // Ensure proper Unicode encoding for Telugu
+  ssml = ssml.normalize("NFC");
+
+  return ssml;
+}
+
 export const generateAudioForTexts = async ({
   enTitle,
   enDescription,
@@ -103,46 +122,106 @@ export const generateAudioForTexts = async ({
 }) => {
   try {
     const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      console.error(
+        "Google API key is missing. Audio generation will be skipped."
+      );
+      return { en: null, te: null };
+    }
+
     const endpoint = `https://texttospeech.googleapis.com/v1beta1/text:synthesize?key=${apiKey}`;
 
     // Combine title + description
     const enText = `<p>Title: ${enTitle}.</p> <p>Description:</p> ${enDescription}`;
     const teText = `<p>శీర్షిక: ${teTitle}.</p> <p>వివరణ:</p> ${teDescription}`;
 
-    // Convert to SSML (or plain text if you don’t need SSML)
-    const enSsml = htmlToSsmlForEn(enText);
-    const teSsml = htmlToSsmlForTe(teText);
+    // Convert to SSML
+    let enSsml = htmlToSsmlForEn(enText);
+    let teSsml = htmlToSsmlForTe(teText);
+
+    // Validate and clean SSML
+    enSsml = validateAndCleanSsml(enSsml);
+    teSsml = validateAndCleanSsml(teSsml);
+
+    console.log("English SSML length:", enSsml.length);
+    console.log("Telugu SSML length:", teSsml.length);
 
     // Helper for Google TTS request
-    const synthesize = async (ssml, languageCode, voiceName) => {
-      const payload = {
-        audioConfig: {
-          audioEncoding: "MP3",
-          pitch: 0,
-          speakingRate: 1,
-        },
-        input: { ssml },
-        voice: { languageCode, name: voiceName },
-      };
-      const res = await axios.post(endpoint, payload);
-      return res.data.audioContent; // base64 encoded mp3
+    const synthesize = async (
+      ssml,
+      languageCode,
+      voiceName,
+      fallbackVoices = []
+    ) => {
+      const voicesToTry = [voiceName, ...fallbackVoices];
+
+      for (const currentVoice of voicesToTry) {
+        const payload = {
+          audioConfig: {
+            audioEncoding: "MP3",
+            pitch: 0,
+            speakingRate: 1,
+          },
+          input: { ssml },
+          voice: { languageCode, name: currentVoice },
+        };
+
+        try {
+          const res = await axios.post(endpoint, payload, {
+            headers: {
+              "Content-Type": "application/json",
+            },
+            timeout: 30000,
+          });
+
+          if (res.data.audioContent) {
+            console.log(
+              `Successfully generated audio with voice: ${currentVoice}`
+            );
+            return res.data.audioContent;
+          }
+        } catch (error) {
+          console.warn(`Voice ${currentVoice} failed, trying next...`);
+          // Continue to next voice
+        }
+      }
+
+      console.error(`All voices failed for ${languageCode}`);
+      return null;
     };
 
-    // Generate both audios in parallel
-    const [enAudio, teAudio] = await Promise.all([
-      // synthesize(enSsml, "en-IN", "en-IN-Chirp3-HD-Achernar"),
-      // synthesize(teSsml, "te-IN", "te-IN-Chirp3-HD-Achird"),
-      synthesize(enSsml, "en-IN", "en-IN-Wavenet-D"),
-      synthesize(teSsml, "te-IN", "te-IN-Standard-A"),
+    // Generate both audios with fallback options
+    const [enAudio, teAudio] = await Promise.allSettled([
+      // English with fallback voices
+      synthesize(
+        enSsml,
+        "en-IN",
+        "en-IN-Chirp3-HD-Achernar",
+        ["en-IN-Wavenet-D", "en-IN-Neural2-A", "en-IN-Standard-A"] // Fallbacks
+      ),
+
+      // Telugu with fallback voices - START WITH STANDARD VOICES
+      synthesize(
+        teSsml,
+        "te-IN",
+        "te-IN-Chirp3-HD-Achernar",
+        ["te-IN-Standard-A", "te-IN-Standard-C", "te-IN-Chirp3-HD-Achird"] // Fallbacks
+      ),
     ]);
 
-    // ✅ Return without saving to any DB
-    return {
-      en: enAudio,
-      te: teAudio,
+    // Extract results
+    const result = {
+      en: enAudio.status === "fulfilled" ? enAudio.value : null,
+      te: teAudio.status === "fulfilled" ? teAudio.value : null,
     };
+
+    // Log results
+    if (result.en === null) console.warn("English audio generation failed");
+    if (result.te === null) console.warn("Telugu audio generation failed");
+
+    return result;
   } catch (err) {
-    console.error("Error while generating audio:", err.message);
-    throw err;
+    console.error("Unexpected error in generateAudioForTexts:", err.message);
+    return { en: null, te: null };
   }
 };

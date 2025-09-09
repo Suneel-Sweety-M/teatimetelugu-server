@@ -63,12 +63,12 @@ export const addGallery = async (req, res) => {
 
     // ✅ Generate unique slug
     const newsId = await generateUniqueSlug(Gallery, titleEn);
-    // const audioFiles = await generateAudioForTexts({
-    //   enTitle: titleEn,
-    //   enDescription: descriptionEn,
-    //   teTitle: titleTe,
-    //   teDescription: descriptionTe,
-    // });
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
 
     const newPost = new Gallery({
       postedBy: user?._id,
@@ -76,10 +76,10 @@ export const addGallery = async (req, res) => {
       name: { en: nameEn, te: nameTe },
       description: { en: descriptionEn, te: descriptionTe },
       category: { en: categoryEn, te: categoryTe },
-      // newsAudio: {
-      //   en: audioFiles.en,
-      //   te: audioFiles.te,
-      // },
+      newsAudio: {
+        en: audioFiles.en,
+        te: audioFiles.te,
+      },
       tags: [
         ...(tagsEn
           ? tagsEn.split(",").map((t) => ({ en: t.trim(), te: "" }))
@@ -544,16 +544,16 @@ export const editGallery = async (req, res) => {
     }
 
     // ✅ Reset and regenerate audio
-    // gallery.newsAudio = null;
+    gallery.newsAudio = null;
 
-    // const audioFiles = await generateAudioForTexts({
-    //   enTitle: titleEn,
-    //   enDescription: descriptionEn,
-    //   teTitle: titleTe,
-    //   teDescription: descriptionTe,
-    // });
+    const audioFiles = await generateAudioForTexts({
+      enTitle: titleEn,
+      enDescription: descriptionEn,
+      teTitle: titleTe,
+      teDescription: descriptionTe,
+    });
 
-    // gallery.newsAudio = audioFiles;
+    gallery.newsAudio = audioFiles;
 
     await gallery.save();
 
