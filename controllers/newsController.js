@@ -378,18 +378,16 @@ export const getFilteredNews = async (req, res) => {
     return res.status(200).json({
       status: "success",
       message: "News fetched successfully",
-      data: {
-        news,
-        pagination: {
-          // page info
-          currentPage: cursor ? null : page,
-          perPage: limit,
-          totalItems: cursor ? null : totalItems,
-          totalPages: cursor ? null : Math.ceil(totalItems / limit) || 1,
-          // cursor info
-          nextCursor,
-          hasMore,
-        },
+      news,
+      pagination: {
+        // page info
+        currentPage: cursor ? null : page,
+        perPage: limit,
+        totalItems: cursor ? null : totalItems,
+        totalPages: cursor ? null : Math.ceil(totalItems / limit) || 1,
+        // cursor info
+        nextCursor,
+        hasMore,
       },
     });
   } catch (error) {
