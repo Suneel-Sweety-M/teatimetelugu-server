@@ -1,3 +1,4 @@
+import sanitizeHtml from "sanitize-html";
 import News from "../models/newsModel.js";
 import Users from "../models/userModel.js";
 import { uploadFile } from "../utils/s3Service.js";
@@ -65,6 +66,23 @@ export const addNews = async (req, res) => {
         .json({ status: "fail", message: "User not found!" });
     }
 
+    // ✅ sanitize & prepare dual descriptions
+    const enHtml = sanitizeHtml(descriptionEn, {
+      allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img", "iframe"]),
+    });
+    const teHtml = sanitizeHtml(descriptionTe, {
+      allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img", "iframe"]),
+    });
+
+    const enText = sanitizeHtml(descriptionEn, {
+      allowedTags: [],
+      allowedAttributes: {},
+    }).trim();
+    const teText = sanitizeHtml(descriptionTe, {
+      allowedTags: [],
+      allowedAttributes: {},
+    }).trim();
+
     const currentUser = await Users.findById(user?._id);
 
     if (
@@ -92,9 +110,9 @@ export const addNews = async (req, res) => {
     const newsId = await generateUniqueSlug(News, titleEn);
     const audioFiles = await generateAudioForTexts({
       enTitle: titleEn,
-      enDescription: descriptionEn,
+      enDescription: enText,
       teTitle: titleTe,
-      teDescription: descriptionTe,
+      teDescription: teText,
     });
 
     // ✅ Create new post
@@ -106,10 +124,7 @@ export const addNews = async (req, res) => {
         en: titleEn,
         te: titleTe,
       },
-      description: {
-        en: descriptionEn,
-        te: descriptionTe,
-      },
+      description: { enHtml, enText, teHtml, teText },
       category: {
         en: categoryEn,
         te: categoryTe,
@@ -161,170 +176,232 @@ export const addNews = async (req, res) => {
   }
 };
 
-// In your backend controller
+// export const getFilteredNews = async (req, res) => {
+//   try {
+//     let {
+//       category = "",
+//       time = "",
+//       searchText = "",
+//       writer = "",
+//       page = 1,
+//       limit = 10,
+//     } = req.query;
+
+//     page = Math.max(parseInt(page, 10) || 1, 1);
+//     limit = Math.min(parseInt(limit, 10) || 10, 100);
+//     const skip = (page - 1) * limit;
+
+//     const match = {};
+
+//     // Category (exact match for index usage)
+//     if (category) match["category.en"] = category.toLowerCase();
+
+//     // Writer filter
+//     if (writer && mongoose.Types.ObjectId.isValid(writer)) {
+//       match.postedBy = new mongoose.Types.ObjectId(writer);
+//     }
+
+//     // Search text (only if >=3 chars)
+//     if (searchText && searchText.trim().length > 2) {
+//       match.$text = { $search: searchText.trim() };
+//     }
+
+//     // Time filter
+//     if (time) {
+//       const now = new Date();
+//       const timeMap = {
+//         "24h": new Date(now.getTime() - 24 * 60 * 60 * 1000),
+//         week: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+//         month: new Date(now.setMonth(now.getMonth() - 1)),
+//         "6months": new Date(now.setMonth(now.getMonth() - 6)),
+//         "1year": new Date(now.setFullYear(now.getFullYear() - 1)),
+//         "2years": new Date(now.setFullYear(now.getFullYear() - 2)),
+//         "3years": new Date(now.setFullYear(now.getFullYear() - 3)),
+//       };
+
+//       if (time.startsWith("above")) {
+//         const cutoff = timeMap[time.replace("above", "")];
+//         if (cutoff) match.createdAt = { $lt: cutoff };
+//       } else if (timeMap[time]) {
+//         match.createdAt = { $gte: timeMap[time] };
+//       }
+//     }
+
+//     // ✅ Aggregation pipeline
+//     const results = await News.aggregate([
+//       { $match: match },
+//       { $sort: { createdAt: -1 } },
+//       {
+//         $facet: {
+//           news: [
+//             { $skip: skip },
+//             { $limit: limit },
+//             {
+//               $lookup: {
+//                 from: "users",
+//                 localField: "postedBy",
+//                 foreignField: "_id",
+//                 pipeline: [{ $project: { fullName: 1, profileUrl: 1 } }],
+//                 as: "postedBy",
+//               },
+//             },
+//             {
+//               $unwind: { path: "$postedBy", preserveNullAndEmptyArrays: true },
+//             },
+//           ],
+//           totalItems: [{ $count: "count" }],
+//         },
+//       },
+//     ]).allowDiskUse(true);
+
+//     const news = results[0]?.news || [];
+//     const totalItems = results[0]?.totalItems[0]?.count || 0;
+
+//     return res.status(200).json({
+//       status: "success",
+//       message: "News fetched successfully",
+//       data: {
+//         news,
+//         pagination: {
+//           currentPage: page,
+//           perPage: limit,
+//           totalItems,
+//           totalPages: Math.ceil(totalItems / limit),
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching filtered news:", error);
+//     res.status(500).json({
+//       status: "error",
+//       message: "Failed to fetch news",
+//       error: process.env.NODE_ENV === "development" ? error.message : undefined,
+//     });
+//   }
+// };
+
 export const getFilteredNews = async (req, res) => {
   try {
     let {
-      category,
-      time,
-      searchText,
-      writer,
+      category = "",
+      time = "",
+      searchText = "",
+      writer = "",
       page = 1,
       limit = 10,
+      cursor = null,
     } = req.query;
 
-    page = parseInt(page);
-    limit = parseInt(limit);
+    limit = Math.min(parseInt(limit, 10) || 10, 100);
+    page = Math.max(parseInt(page, 10) || 1, 1);
 
-    const filter = {};
+    const match = {};
 
-    // Category filter
-    if (category) {
-      filter.$or = [
-        { "category.en": { $regex: category, $options: "i" } },
-        { "category.te": { $regex: category, $options: "i" } },
-      ];
-    }
+    // Category filter (index friendly)
+    if (category) match["category.en"] = category.toLowerCase();
 
     // Writer filter
     if (writer && mongoose.Types.ObjectId.isValid(writer)) {
-      filter.postedBy = new mongoose.Types.ObjectId(writer);
+      match.postedBy = new mongoose.Types.ObjectId(writer);
     }
 
-    // Search filter (title + description + tags)
-    if (searchText) {
-      filter.$or = [
-        { "title.en": { $regex: searchText, $options: "i" } },
-        { "title.te": { $regex: searchText, $options: "i" } },
-        { "description.en": { $regex: searchText, $options: "i" } },
-        { "description.te": { $regex: searchText, $options: "i" } },
-        { "tags.en": { $in: [new RegExp(searchText, "i")] } },
-        { "tags.te": { $in: [new RegExp(searchText, "i")] } },
-      ];
+    // Search text
+    if (searchText && searchText.trim().length > 2) {
+      match.$text = { $search: searchText.trim() };
     }
 
     // Time filter
     if (time) {
       const now = new Date();
-      let fromDate = null;
+      const timeMap = {
+        "24h": new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        week: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+        month: new Date(now.setMonth(now.getMonth() - 1)),
+        "6months": new Date(now.setMonth(now.getMonth() - 6)),
+        "1year": new Date(now.setFullYear(now.getFullYear() - 1)),
+        "2years": new Date(now.setFullYear(now.getFullYear() - 2)),
+        "3years": new Date(now.setFullYear(now.getFullYear() - 3)),
+      };
 
-      switch (time) {
-        // ✅ Within filters
-        case "24h":
-          fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "week":
-          fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "month":
-          fromDate = new Date(
-            now.getFullYear(),
-            now.getMonth() - 1,
-            now.getDate()
-          );
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "6months":
-          fromDate = new Date(
-            now.getFullYear(),
-            now.getMonth() - 6,
-            now.getDate()
-          );
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "1year":
-          fromDate = new Date(
-            now.getFullYear() - 1,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "2years":
-          fromDate = new Date(
-            now.getFullYear() - 2,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $gte: fromDate };
-          break;
-        case "3years":
-          fromDate = new Date(
-            now.getFullYear() - 3,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $gte: fromDate };
-          break;
-
-        // ✅ Above filters (older than)
-        case "above6months":
-          fromDate = new Date(
-            now.getFullYear(),
-            now.getMonth() - 6,
-            now.getDate()
-          );
-          filter.createdAt = { $lt: fromDate };
-          break;
-        case "above1year":
-          fromDate = new Date(
-            now.getFullYear() - 1,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $lt: fromDate };
-          break;
-        case "above2years":
-          fromDate = new Date(
-            now.getFullYear() - 2,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $lt: fromDate };
-          break;
-        case "above3years":
-          fromDate = new Date(
-            now.getFullYear() - 3,
-            now.getMonth(),
-            now.getDate()
-          );
-          filter.createdAt = { $lt: fromDate };
-          break;
-
-        default:
-          break;
+      if (time.startsWith("above")) {
+        const cutoff = timeMap[time.replace("above", "")];
+        if (cutoff) match.createdAt = { $lt: cutoff };
+      } else if (timeMap[time]) {
+        match.createdAt = { $gte: timeMap[time] };
       }
     }
 
-    // Count total docs for pagination
-    const totalItems = await News.countDocuments(filter);
+    let news = [];
+    let nextCursor = null;
+    let hasMore = false;
+    let totalItems = 0;
 
-    // Fetch paginated news
-    const news = await News.find(filter)
-      .populate("postedBy", "fullName profileUrl")
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
+    if (cursor) {
+      // ✅ Cursor-based fetch
+      const [createdAt, id] = cursor.split("_");
+      match.$or = [
+        { createdAt: { $lt: new Date(createdAt) } },
+        {
+          createdAt: new Date(createdAt),
+          _id: { $lt: new mongoose.Types.ObjectId(id) },
+        },
+      ];
 
-    return res.json({
-      news,
-      pagination: {
-        currentPage: page,
-        perPage: limit,
-        totalItems,
-        totalPages: Math.ceil(totalItems / limit),
-      },
+      news = await News.find(match)
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit + 1)
+        .populate("postedBy", "fullName profileUrl")
+        .lean()
+        .exec();
+
+      if (news.length > limit) {
+        const last = news[limit - 1];
+        nextCursor = `${last.createdAt.toISOString()}_${last._id.toString()}`;
+        hasMore = true;
+      }
+
+      news = news.slice(0, limit);
+    } else {
+      // ✅ Page-based fetch
+      const skip = (page - 1) * limit;
+      totalItems = await News.countDocuments(match);
+
+      news = await News.find(match)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("postedBy", "fullName profileUrl")
+        .lean()
+        .exec();
+    }
+
+    return res.status(200).json({
       status: "success",
+      message: "News fetched successfully",
+      data: {
+        news,
+        pagination: {
+          // page info
+          currentPage: cursor ? null : page,
+          perPage: limit,
+          totalItems: cursor ? null : totalItems,
+          totalPages: cursor ? null : Math.ceil(totalItems / limit) || 1,
+          // cursor info
+          nextCursor,
+          hasMore,
+        },
+      },
     });
   } catch (error) {
     console.error("Error fetching filtered news:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch news",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
   }
 };
 
-// ✅ Get News by ID
 export const getNewsById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -677,8 +754,8 @@ export const getLatestNews = async (req, res) => {
     const news = await News.find()
       .populate("postedBy", "fullName profileUrl")
       .sort({ createdAt: -1 }) // Sort by newest first
-      .limit(10) // Limit to latest 10 news
-      .exec();
+      .limit(10)
+      .lean();
 
     return res.status(200).json({
       status: "success",

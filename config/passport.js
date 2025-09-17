@@ -5,7 +5,7 @@ import { createJWT, createRefreshJWT } from "../middlewares/jwt.js";
 
 const googleClientID = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
-const callbackURL = `${process.env.API_URL}/api/v1/auth/google/callback`;
+const callbackURL = `${process.env.API_URL}/api/v1/auth/google/callback`; 
 
 passport.use(
   new GoogleStrategy(

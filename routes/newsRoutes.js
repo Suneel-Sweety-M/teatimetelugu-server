@@ -16,7 +16,7 @@ import {
 } from "../controllers/newsController.js";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage() }); 
 
 router.get("/filter", getFilteredNews);
 router.get("/category", getCategoryNews);
